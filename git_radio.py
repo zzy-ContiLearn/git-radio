@@ -1,23 +1,3 @@
-# git-radio
-create a git radio which can help u getting newest imformation about what u watching repos when u get up!
-
-> 下面我将为您设计一个利用大模型MCP协议的Python软件，实现GitHub仓库监控和语音播报功能。这个程序会从GitHub获取您关注的仓库动态和每日热门趋势，通过大模型摘要后语音播报。
-
-### 设计思路
-1. **数据获取**：通过GitHub API获取关注仓库动态 + 第三方API获取Trending数据
-2. **信息处理**：使用OpenAI GPT模型进行信息摘要
-3. **语音输出**：通过pyttsx3实现语音播报
-4. **协议遵循**：采用MCP协议实现模块化通信
-
-### 环境准备
-首先安装所需依赖：
-```bash
-pip install requests pyttsx3 python-dotenv openai beautifulsoup4
-```
-
-### 代码实现
-
-```python
 import os
 import requests
 import pyttsx3
@@ -32,6 +12,7 @@ load_dotenv()
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
+
 # 初始化语音引擎
 def init_tts_engine():
     engine = pyttsx3.init()
@@ -41,11 +22,13 @@ def init_tts_engine():
     engine.setProperty('voice', voices[1].id)  # 选择女声
     return engine
 
+
 # 获取关注的仓库列表
 def get_watched_repos():
     headers = {'Authorization': f'token {GITHUB_TOKEN}'}
     response = requests.get('https://api.github.com/user/subscriptions', headers=headers)
     return response.json() if response.status_code == 200 else []
+
 
 # 获取仓库昨日事件
 def get_repo_events(owner, repo):
@@ -53,21 +36,22 @@ def get_repo_events(owner, repo):
     headers = {'Authorization': f'token {GITHUB_TOKEN}'}
     url = f'https://api.github.com/repos/{owner}/{repo}/events'
     events = requests.get(url, headers=headers).json()
-    
+
     return [e for e in events if e['created_at'].startswith(yesterday)]
+
 
 # 获取GitHub Trending仓库
 def get_trending_repos():
     try:
         response = requests.get('https://github.com/trending?since=daily')
         soup = BeautifulSoup(response.text, 'html.parser')
-        
+
         trending_repos = []
         for article in soup.select('article.Box-row'):
             title = article.select_one('h2.h3').text.strip().replace('\n', '').replace(' ', '')
             description = article.select_one('p').text.strip() if article.select_one('p') else ''
             stars = article.select('a.Link--muted')[0].text.strip()
-            
+
             trending_repos.append({
                 'name': title,
                 'description': description,
@@ -75,19 +59,20 @@ def get_trending_repos():
             })
             if len(trending_repos) >= 10:  # 限制10个结果
                 break
-                
+
         return trending_repos
     except Exception as e:
         print(f"Error fetching trending: {e}")
         return []
 
+
 # 使用GPT摘要信息
 def summarize_with_gpt(watched_events, trending_repos):
     openai.api_key = OPENAI_API_KEY
-    
+
     prompt = "请总结以下GitHub昨日动态：\n"
     prompt += "## 关注仓库动态 ##\n"
-    
+
     if not watched_events:
         prompt += "无重要事件\n"
     else:
@@ -96,15 +81,15 @@ def summarize_with_gpt(watched_events, trending_repos):
             event_type = event['type']
             actor = event['actor']['login']
             created_at = event['created_at']
-            
+
             prompt += f"- 仓库 {repo_name}: {actor} 进行了 {event_type} 操作 (时间: {created_at})\n"
-    
+
     prompt += "\n## 昨日热门仓库 ##\n"
     for repo in trending_repos:
         prompt += f"- {repo['name']}: {repo['description']} (星标: {repo['stars']})\n"
-    
+
     prompt += "\n请用简洁的口语化中文总结要点，突出重要事件和热门项目，限150字以内"
-    
+
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -116,16 +101,17 @@ def summarize_with_gpt(watched_events, trending_repos):
         print(f"GPT错误: {e}")
         return "无法生成摘要，请检查API设置"
 
+
 # 主程序
 def main():
     # 初始化语音引擎
     tts_engine = init_tts_engine()
-    
+
     # 获取关注仓库
     print("获取关注仓库...")
     repos = get_watched_repos()
     print(f"找到 {len(repos)} 个关注仓库")
-    
+
     # 收集昨日事件
     watched_events = []
     for repo in repos[:5]:  # 限制检查5个仓库
@@ -135,75 +121,22 @@ def main():
         if events:
             watched_events.extend(events)
         time.sleep(1)  # 避免触发速率限制
-    
+
     # 获取Trending仓库
     print("获取GitHub Trending...")
     trending_repos = get_trending_repos()
-    
+
     # 生成摘要
     print("生成摘要...")
     summary = summarize_with_gpt(watched_events, trending_repos)
     print("\n摘要内容：")
     print(summary)
-    
+
     # 语音播报
     print("\n语音播报中...")
     tts_engine.say(summary)
     tts_engine.runAndWait()
 
+
 if __name__ == "__main__":
     main()
-```
-
-### 使用说明
-
-1. **环境配置**：
-   - 创建`.env`文件并添加凭证：
-     ```env
-     GITHUB_TOKEN=您的GitHub个人访问令牌
-     OPENAI_API_KEY=您的OpenAI API密钥
-     ```
-   - 在[GitHub设置](https://github.com/settings/tokens)创建Token（需勾选`repo`和`user`权限）
-   - 在[OpenAI平台](https://platform.openai.com/api-keys)获取API密钥
-
-2. **功能定制**：
-   - **调整语速**：修改`init_tts_engine()`中的`rate`属性
-   - **筛选事件**：在`get_repo_events()`中添加事件类型过滤
-   - **修改摘要风格**：调整`summarize_with_gpt()`中的prompt指令
-
-3. **运行要求**：
-   - Python 3.7+
-   - Windows系统可直接运行
-   - Linux/Mac需安装`espeak`：`sudo apt install espeak`
-
-### 技术架构
-
-```mermaid
-graph LR
-A[GitHub API] --> B[数据获取]
-C[Trending页面] --> B
-B --> D[数据处理]
-D --> E[GPT摘要]
-E --> F[语音播报]
-```
-
-### 注意事项
-
-1. **速率限制**：
-   - GitHub API限制每小时5000次请求
-   - 默认配置只检查最近更新的仓库
-   - 添加`time.sleep(1)`避免触发限制
-
-2. **备选方案**：
-   - 若Trending爬取失败，可改用备用API：
-     ```python
-     response = requests.get('https://trendings.herokuapp.com/repo?since=daily')
-     ```
-
-3. **语音优化**：
-   - 需要更自然语音时可改用Google TTS：
-     ```python
-     engine.setProperty('voice', 'com.apple.speech.synthesis.voice.meijia')
-     ```
-
-此程序每日运行时将自动获取您关注的仓库动态和GitHub趋势，通过AI摘要后以清晰语音报告。您可将其设置为定时任务（如使用cron或Windows任务计划程序），实现每日自动化信息播报。
