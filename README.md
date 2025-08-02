@@ -1,204 +1,150 @@
-# git-radio
-create a git radio which can help u getting newest imformation about what u watching repos when u get up!
+# 🎵 Git Radio
 
-> 下面我将为您设计一个利用大模型MCP协议的Python软件，实现GitHub仓库监控和语音播报功能。这个程序会从GitHub获取您关注的仓库动态和每日热门趋势，通过大模型摘要后语音播报。
+一个智能的GitHub动态播报工具，每天为你播报关注仓库的重要更新和GitHub热门项目趋势。
 
-### 设计思路
-1. **数据获取**：通过GitHub API获取关注仓库动态 + 第三方API获取Trending数据
-2. **信息处理**：使用OpenAI GPT模型进行信息摘要
-3. **语音输出**：通过pyttsx3实现语音播报
-4. **协议遵循**：采用MCP协议实现模块化通信
+## ✨ 功能特色
 
-### 环境准备
-首先安装所需依赖：
+- 📊 **智能监控**: 分析你starred的仓库过去24小时的重要动态
+- 🔥 **热门趋势**: 获取GitHub今日trending项目
+- 🤖 **AI摘要**: 使用GPT智能生成播报内容
+- 🎙️ **语音播报**: 自动语音播报，解放双眼
+- 📈 **重点筛选**: 自动识别热门PR、新版本发布等重要事件
+
+## 🚀 快速开始
+
+### 1. 环境准备
+
+确保你的系统已安装Python 3.7+，然后安装依赖：
+
 ```bash
-pip install requests pyttsx3 python-dotenv openai beautifulsoup4
+# 克隆项目
+git clone <your-repo-url>
+cd git-radio
+
+# 安装依赖
+pip install -r requirements.txt
 ```
 
-### 代码实现
+### 2. 配置环境变量
 
-```python
-import os
-import requests
-import pyttsx3
-from datetime import datetime, timedelta
-from dotenv import load_dotenv
-import time
-import openai
-from bs4 import BeautifulSoup
+创建 `.env` 文件并添加必要的API密钥：
 
-# 加载环境变量
-load_dotenv()
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-
-# 初始化语音引擎
-def init_tts_engine():
-    engine = pyttsx3.init()
-    engine.setProperty('rate', 150)  # 语速150%
-    engine.setProperty('volume', 0.9)  # 音量90%
-    voices = engine.getProperty('voices')
-    engine.setProperty('voice', voices[1].id)  # 选择女声
-    return engine
-
-# 获取关注的仓库列表
-def get_watched_repos():
-    headers = {'Authorization': f'token {GITHUB_TOKEN}'}
-    response = requests.get('https://api.github.com/user/subscriptions', headers=headers)
-    return response.json() if response.status_code == 200 else []
-
-# 获取仓库昨日事件
-def get_repo_events(owner, repo):
-    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-    headers = {'Authorization': f'token {GITHUB_TOKEN}'}
-    url = f'https://api.github.com/repos/{owner}/{repo}/events'
-    events = requests.get(url, headers=headers).json()
-    
-    return [e for e in events if e['created_at'].startswith(yesterday)]
-
-# 获取GitHub Trending仓库
-def get_trending_repos():
-    try:
-        response = requests.get('https://github.com/trending?since=daily')
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        trending_repos = []
-        for article in soup.select('article.Box-row'):
-            title = article.select_one('h2.h3').text.strip().replace('\n', '').replace(' ', '')
-            description = article.select_one('p').text.strip() if article.select_one('p') else ''
-            stars = article.select('a.Link--muted')[0].text.strip()
-            
-            trending_repos.append({
-                'name': title,
-                'description': description,
-                'stars': stars
-            })
-            if len(trending_repos) >= 10:  # 限制10个结果
-                break
-                
-        return trending_repos
-    except Exception as e:
-        print(f"Error fetching trending: {e}")
-        return []
-
-# 使用GPT摘要信息
-def summarize_with_gpt(watched_events, trending_repos):
-    openai.api_key = OPENAI_API_KEY
-    
-    prompt = "请总结以下GitHub昨日动态：\n"
-    prompt += "## 关注仓库动态 ##\n"
-    
-    if not watched_events:
-        prompt += "无重要事件\n"
-    else:
-        for event in watched_events:
-            repo_name = event['repo']['name']
-            event_type = event['type']
-            actor = event['actor']['login']
-            created_at = event['created_at']
-            
-            prompt += f"- 仓库 {repo_name}: {actor} 进行了 {event_type} 操作 (时间: {created_at})\n"
-    
-    prompt += "\n## 昨日热门仓库 ##\n"
-    for repo in trending_repos:
-        prompt += f"- {repo['name']}: {repo['description']} (星标: {repo['stars']})\n"
-    
-    prompt += "\n请用简洁的口语化中文总结要点，突出重要事件和热门项目，限150字以内"
-    
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=300
-        )
-        return response.choices[0].message['content'].strip()
-    except Exception as e:
-        print(f"GPT错误: {e}")
-        return "无法生成摘要，请检查API设置"
-
-# 主程序
-def main():
-    # 初始化语音引擎
-    tts_engine = init_tts_engine()
-    
-    # 获取关注仓库
-    print("获取关注仓库...")
-    repos = get_watched_repos()
-    print(f"找到 {len(repos)} 个关注仓库")
-    
-    # 收集昨日事件
-    watched_events = []
-    for repo in repos[:5]:  # 限制检查5个仓库
-        owner, repo_name = repo['full_name'].split('/')
-        print(f"检查 {owner}/{repo_name}...")
-        events = get_repo_events(owner, repo_name)
-        if events:
-            watched_events.extend(events)
-        time.sleep(1)  # 避免触发速率限制
-    
-    # 获取Trending仓库
-    print("获取GitHub Trending...")
-    trending_repos = get_trending_repos()
-    
-    # 生成摘要
-    print("生成摘要...")
-    summary = summarize_with_gpt(watched_events, trending_repos)
-    print("\n摘要内容：")
-    print(summary)
-    
-    # 语音播报
-    print("\n语音播报中...")
-    tts_engine.say(summary)
-    tts_engine.runAndWait()
-
-if __name__ == "__main__":
-    main()
+```env
+GITHUB_TOKEN=your_github_personal_access_token
+OPENAI_API_KEY=your_openai_api_key  # 可选，用于AI摘要
 ```
 
-### 使用说明
+#### 获取GitHub Token
+1. 访问 [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens)
+2. 点击 "Generate new token (classic)"
+3. 选择权限：`repo`, `user:read`
+4. 复制生成的token到 `.env` 文件
 
-1. **环境配置**：
-   - 创建`.env`文件并添加凭证：
-     ```env
-     GITHUB_TOKEN=您的GitHub个人访问令牌
-     OPENAI_API_KEY=您的OpenAI API密钥
-     ```
-   - 在[GitHub设置](https://github.com/settings/tokens)创建Token（需勾选`repo`和`user`权限）
-   - 在[OpenAI平台](https://platform.openai.com/api-keys)获取API密钥
+#### 获取OpenAI API Key（可选）
+1. 访问 [OpenAI Platform](https://platform.openai.com/api-keys)
+2. 创建新的API密钥
+3. 复制到 `.env` 文件
 
-2. **功能定制**：
-   - **调整语速**：修改`init_tts_engine()`中的`rate`属性
-   - **筛选事件**：在`get_repo_events()`中添加事件类型过滤
-   - **修改摘要风格**：调整`summarize_with_gpt()`中的prompt指令
+> 💡 如果不配置OpenAI API，程序会使用内置的简单摘要功能
 
-3. **运行要求**：
-   - Python 3.7+
-   - Windows系统可直接运行
-   - Linux/Mac需安装`espeak`：`sudo apt install espeak`
+### 3. 运行程序
 
-### 技术架构
-
-```mermaid
-graph LR
-A[GitHub API] --> B[数据获取]
-C[Trending页面] --> B
-B --> D[数据处理]
-D --> E[GPT摘要]
-E --> F[语音播报]
+```bash
+python git_radio.py
 ```
 
-### 注意事项
+程序将自动：
+1. 🔍 分析你starred的仓库过去24小时动态
+2. 📈 获取GitHub今日热门项目
+3. 🤖 生成智能摘要
+4. 🎙️ 语音播报结果
 
-1. **速率限制**：
-   - GitHub API限制每小时5000次请求
-   - 默认配置只检查最近更新的仓库
-   - 添加`time.sleep(1)`避免触发限制
+## 📋 功能详解
 
-2. **备选方案**：
-   - 若Trending爬取失败，可改用备用API：
-     ```python
-     response = requests.get('https://trendings.herokuapp.com/repo?since=daily')
-     ```
+### 智能事件筛选
+程序会自动识别以下重要事件：
+- 🔥 **热门PR**: 评论数超过5的Pull Request
+- 🚀 **新版本发布**: Release事件
+- 💡 **新功能**: 新的Pull Request
+- 🐛 **问题跟踪**: Issues的创建和更新
+- 📝 **代码提交**: 重要的Push事件
+
+### Trending分析
+- 📊 获取GitHub今日trending项目
+- 🌟 显示今日新增star数
+- 💻 标注编程语言
+- 📖 提供项目描述
+
+### AI摘要生成
+- 🤖 使用GPT生成自然语言摘要
+- 🗣️ 口语化表达，适合语音播报
+- 📝 备用简单摘要（无需OpenAI API）
+
+## ⚙️ 自定义配置
+
+### 语音设置
+在 `init_tts_engine()` 函数中可以调整：
+- `rate`: 语速（默认150）
+- `volume`: 音量（默认0.9）
+- `voice`: 语音类型（默认女声）
+
+### 监控范围
+- 默认检查最近更新的10个starred仓库
+- 可在 `main()` 函数中修改 `recent_repos[:10]` 调整数量
+
+### 摘要风格
+在 `summarize_with_gpt()` 函数中可以：
+- 修改prompt模板
+- 调整摘要长度
+- 改变语言风格
+
+## 🔧 系统要求
+
+- **Python**: 3.7+
+- **操作系统**: 
+  - ✅ Windows（直接运行）
+  - ✅ macOS（直接运行）
+  - ✅ Linux（需安装espeak: `sudo apt install espeak`）
+
+## 🏗️ 技术架构
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   GitHub API    │───▶│   数据处理模块    │───▶│   AI摘要生成     │
+│ (Starred Repos) │    │ (事件筛选/分析)   │    │  (GPT/简单摘要)  │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                                         │
+┌─────────────────┐    ┌──────────────────┐             ▼
+│ GitHub Trending │───▶│   网页解析模块    │    ┌─────────────────┐
+│   (热门项目)     │    │ (BeautifulSoup)  │───▶│    语音播报      │
+└─────────────────┘    └──────────────────┘    │   (pyttsx3)     │
+                                               └─────────────────┘
+```
+
+## ⚠️ 注意事项
+
+### API限制
+- **GitHub API**: 每小时5000次请求（已登录）
+- **OpenAI API**: 根据你的套餐限制
+- 程序已内置延时机制避免触发限制
+
+### 故障处理
+- 🔄 网络异常时会自动重试
+- 🛡️ API失败时使用备用方案
+- 📝 详细的错误日志输出
+
+### 隐私安全
+- 🔐 API密钥存储在本地.env文件
+- 🚫 不会上传任何个人数据
+- 👀 只读取公开的GitHub信息
+
+## 🤝 贡献
+
+欢迎提交Issue和Pull Request！
+
+## 📄 许可证
+
+MIT License - 详见 [LICENSE](LICENSE) 文件
 
 3. **语音优化**：
    - 需要更自然语音时可改用Google TTS：
